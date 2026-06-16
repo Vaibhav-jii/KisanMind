@@ -15,7 +15,7 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
 API_KEY = os.getenv("LLM_API_KEY")

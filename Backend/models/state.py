@@ -8,9 +8,10 @@ LangGraph can checkpoint, serialize, and parallelize cleanly.
 
 from __future__ import annotations
 
+import operator
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
@@ -109,14 +110,14 @@ class KisanMindState(TypedDict, total=False):
     # ── Performance Metrics ──
     execution_time_parallel: Optional[float]
     execution_time_sequential: Optional[float]
-    agent_times: Optional[dict[str, float]]  # individual agent timings
+    agent_times: Annotated[dict[str, float], operator.ior]  # individual agent timings
 
     # ── Session Metadata ──
     session_id: str
     timestamp: str  # ISO format string (JSON-serializable)
 
     # ── Error Tracking ──
-    errors: Optional[dict[str, str]]  # agent_name -> error message
+    errors: Annotated[dict[str, str], operator.ior]  # agent_name -> error message
 
 
 def create_initial_state(

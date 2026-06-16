@@ -135,16 +135,6 @@ def build_graph() -> StateGraph:
     return workflow
 
 
-async def compile_graph():
-    """
-    Compile the graph with SQLite checkpointing enabled.
-    Returns a runnable graph instance.
-    """
-    workflow = build_graph()
-    checkpointer = await get_checkpointer()
-    return workflow.compile(checkpointer=checkpointer)
-
-
 async def run_pipeline(state: KisanMindState) -> KisanMindState:
     """
     Main entry point: Run the full KisanMind pipeline.
@@ -157,17 +147,22 @@ async def run_pipeline(state: KisanMindState) -> KisanMindState:
         Completed state with all agent results and final report
     """
     start_time = time.time()
+    workflow = build_graph()
 
-    graph = await compile_graph()
+    # Create checkpointer async context manager
+    checkpointer_cm = await get_checkpointer()
 
-    # Run with a config that includes the session_id as thread_id
-    config = {
-        "configurable": {
-            "thread_id": state.get("session_id", "default"),
+    async with checkpointer_cm as checkpointer:
+        graph = workflow.compile(checkpointer=checkpointer)
+
+        # Run with a config that includes the session_id as thread_id
+        config = {
+            "configurable": {
+                "thread_id": state.get("session_id", "default"),
+            }
         }
-    }
 
-    result = await graph.ainvoke(state, config=config)
+        result = await graph.ainvoke(state, config=config)
 
     # Measure total parallel execution time
     parallel_time = round(time.time() - start_time, 3)

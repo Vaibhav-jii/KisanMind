@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-import google.generativeai as genai
+import google.genai as genai
 from dotenv import load_dotenv
 
 from models.state import DiseaseResult, KisanMindState
@@ -18,9 +18,7 @@ load_dotenv()
 
 # Configure Gemini Vision — always uses Gemini regardless of LLM_PROVIDER
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
-
-VISION_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 DISEASE_PROMPT = """You are an expert agricultural plant pathologist AI for Indian farming.
 Analyze the provided crop image carefully and return a JSON object with exactly these fields:
@@ -61,17 +59,16 @@ async def run_disease_agent(state: KisanMindState) -> KisanMindState:
         }
 
     try:
-        # Build multimodal content for Gemini Vision
-        image_part = {
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": image_b64,
-            }
-        }
+        # Build multimodal content for Gemini Vision (new SDK)
+        image_part = genai.types.Part.from_bytes(
+            data=__import__("base64").b64decode(image_b64),
+            mime_type="image/jpeg",
+        )
 
-        response = VISION_MODEL.generate_content(
-            [DISEASE_PROMPT, image_part],
-            generation_config=genai.GenerationConfig(
+        response = client.models.generate_content(
+            model=os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash"),
+            contents=[DISEASE_PROMPT, image_part],
+            config=genai.types.GenerateContentConfig(
                 temperature=0.2,
                 max_output_tokens=1024,
             ),
