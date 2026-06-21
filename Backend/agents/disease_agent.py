@@ -75,7 +75,7 @@ async def run_disease_agent(state: KisanMindState) -> KisanMindState:
         )
 
         response = get_genai_client().models.generate_content(
-            model=os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash"),
+            model=os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash"),
             contents=[DISEASE_PROMPT, image_part],
             config=genai.types.GenerateContentConfig(
                 temperature=0.2,

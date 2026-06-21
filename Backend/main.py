@@ -210,6 +210,50 @@ async def health_check():
 
 
 # ──────────────────────────────────────────────
+# GET /settings/model — Current LLM info
+# ──────────────────────────────────────────────
+
+@app.get("/settings/model")
+async def get_model_settings():
+    """
+    Return current LLM provider, model name, and available providers.
+    """
+    from utils.llm_provider import get_manager
+    manager = get_manager()
+    return {
+        "success": True,
+        **manager.get_provider_info(),
+    }
+
+
+# ──────────────────────────────────────────────
+# POST /settings/model — Switch LLM at runtime
+# ──────────────────────────────────────────────
+
+@app.post("/settings/model")
+async def switch_model(
+    provider: str = Form(..., description="LLM provider: gemini, groq, ollama, openrouter, openai"),
+    model_name: str = Form(None, description="Optional model name override"),
+):
+    """
+    Hot-swap the active LLM provider and model at runtime.
+    Takes effect immediately for all subsequent agent calls.
+    """
+    from utils.llm_provider import get_manager
+    manager = get_manager()
+
+    try:
+        info = manager.switch_provider(provider, model_name or None)
+        return {
+            "success": True,
+            "message": f"Switched to {info['provider']} / {info['model']}",
+            **info,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ──────────────────────────────────────────────
 # GET /weather — Standalone live weather
 # ──────────────────────────────────────────────
 

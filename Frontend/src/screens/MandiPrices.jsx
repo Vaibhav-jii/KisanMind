@@ -5,12 +5,12 @@ import { useApp } from '../context/AppContext.jsx'
 import { t } from '../data/i18n.js'
 import Screen from '../components/Screen.jsx'
 import { fetchPrediction } from '../utils/api.js'
-import { crops, indianStates, datasetStates, getDistrictsForState, lastKnownPrices } from '../data/mockData.js'
+import { crops, datasetStates, lastKnownPrices } from '../data/mockData.js'
 
 export default function MandiPrices() {
   const { lang, advisoryData } = useApp()
   const [crop, setCrop] = useState('wheat')
-  const [selectedState, setSelectedState] = useState('Uttar Pradesh')
+  const [selectedState, setSelectedState] = useState('Andhra Pradesh')
   const [prediction, setPrediction] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -65,7 +65,7 @@ export default function MandiPrices() {
         : `XGBoost Model: ₹${Math.round(predictedPrice)} predicted in 7 days. ${Number(trendPercent) > 0 ? 'Upward' : 'Downward'} trend.`)
       : ''
 
-  const hasDataset = datasetStates.includes(selectedState)
+
   const cropInfo = crops.find((c) => c.id === crop)
 
   return (
@@ -79,23 +79,10 @@ export default function MandiPrices() {
             onChange={(e) => setSelectedState(e.target.value)}
             className="tap w-full bg-panel border border-crop/20 rounded-xl px-3 py-2 text-sm focus:border-crop outline-none appearance-none pr-8"
           >
-            {/* Dataset states first */}
-            <optgroup label={lang === 'hi' ? '📊 डेटा उपलब्ध' : '📊 Data Available'}>
-              {datasetStates.map((s) => <option key={s} className="bg-panel">{s}</option>)}
-            </optgroup>
-            <optgroup label={lang === 'hi' ? '🌤️ केवल मौसम' : '🌤️ Weather Only'}>
-              {indianStates.filter((s) => !datasetStates.includes(s)).map((s) => (
-                <option key={s} className="bg-panel">{s}</option>
-              ))}
-            </optgroup>
+            {datasetStates.map((s) => <option key={s} className="bg-panel">{s}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)] pointer-events-none" />
         </div>
-        {!hasDataset && (
-          <p className="text-[10px] text-yellow-400 mt-1">
-            {lang === 'hi' ? '⚠️ इस राज्य के लिए डेटासेट में भाव उपलब्ध नहीं है' : '⚠️ No price data in dataset for this state'}
-          </p>
-        )}
       </div>
 
       {/* Crop selector pills — horizontal scroll */}
