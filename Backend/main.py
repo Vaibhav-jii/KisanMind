@@ -423,6 +423,245 @@ async def get_prediction(
 
 
 # ──────────────────────────────────────────────
+# GET /voice/greet — Voice greeting TTS
+# ──────────────────────────────────────────────
+
+@app.get("/voice/greet")
+async def voice_greet(lang: str = "en"):
+    """
+    Generate a TTS greeting audio for the voice assistant.
+    Returns base64 audio and greeting text.
+    """
+    import httpx
+
+    sarvam_key = os.getenv("SARVAM_API_KEY")
+
+    greetings = {
+        "hi": "नमस्ते! मैं किसानमाइंड हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?",
+        "en": "Hello! I am KisanMind, your farming assistant. How can I help you today?",
+    }
+    greeting_text = greetings.get(lang, greetings["en"])
+
+    audio_base64 = ""
+    if sarvam_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                tts_payload = {
+                    "text": greeting_text,
+                    "speaker": "anushka",
+                    "target_language_code": "hi-IN" if lang == "hi" else "en-IN",
+                }
+                tts_headers = {
+                    "api-subscription-key": sarvam_key,
+                    "Content-Type": "application/json",
+                }
+                tts_response = await client.post(
+                    "https://api.sarvam.ai/text-to-speech",
+                    json=tts_payload,
+                    headers=tts_headers,
+                    timeout=30.0,
+                )
+                if tts_response.status_code == 200:
+                    audios = tts_response.json().get("audios", [])
+                    audio_base64 = audios[0] if audios else ""
+                else:
+                    print(f"Sarvam TTS greeting failed: {tts_response.text}")
+        except Exception as e:
+            print(f"Sarvam TTS greeting error: {str(e)}")
+
+    return {
+        "success": True,
+        "greeting_text": greeting_text,
+        "audio_response": audio_base64,
+    }
+
+
+# ──────────────────────────────────────────────
+# POST /voice/chat — Voice-to-voice RAG chat
+# ──────────────────────────────────────────────
+
+@app.post("/voice/chat")
+async def voice_chat(
+    session_id: str = Form(..., description="Session ID"),
+    lang: str = Form("en", description="Language code: hi or en"),
+    audio: Optional[UploadFile] = File(None, description="Optional recorded audio file"),
+    text: Optional[str] = Form(None, description="Optional text query fallback"),
+):
+    """
+    RAG voice-to-voice chat endpoint using Sarvam AI Indic STT/TTS.
+    """
+    import httpx
+    import base64
+    from memory.long_term import get_history, search_similar
+    from models.price_predictor import predict
+    
+    # 1. Transcription (Sarvam STT)
+    query_text = ""
+    sarvam_key = os.getenv("SARVAM_API_KEY")
+    
+    if audio and audio.filename:
+        # Read uploaded audio content
+        audio_content = await audio.read()
+        
+        # Call Sarvam STT REST API
+        async with httpx.AsyncClient() as client:
+            try:
+                # Sarvam STT expects multipart form data
+                files = {"file": (audio.filename or "audio.wav", audio_content, audio.content_type or "audio/wav")}
+                data = {"model": "saaras:v3", "mode": "transcribe"}
+                headers = {"api-subscription-key": sarvam_key}
+                
+                response = await client.post(
+                    "https://api.sarvam.ai/speech-to-text",
+                    files=files,
+                    data=data,
+                    headers=headers,
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    query_text = response.json().get("transcript", "").strip()
+                else:
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"Sarvam STT failed: {response.text}"
+                    )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Sarvam STT connection error: {str(e)}")
+    elif text:
+        query_text = text.strip()
+    else:
+        raise HTTPException(status_code=400, detail="Either 'audio' or 'text' must be provided.")
+        
+    if not query_text:
+        return {
+            "success": True,
+            "query": "",
+            "text_response": "I didn't hear anything. Please try speaking again." if lang == "en" else "मैंने कुछ नहीं सुना। कृपया फिर से बोलें।",
+            "audio_response": None
+        }
+
+    # 2. RAG Context Collection
+    # Search past reports in ChromaDB
+    similar_docs = search_similar(query_text, n_results=3)
+    history_docs = get_history(session_id, limit=5)
+    
+    # Collect metadata like crop and location to fetch market prediction if query is market related
+    crop_context = None
+    location_context = None
+    
+    # Try to extract crop/location from history metadata
+    if history_docs:
+        latest = history_docs[0]
+        meta = latest.get("metadata", {})
+        crop_context = meta.get("crop")
+        location_context = meta.get("location")
+        
+    # Build ChromaDB reports context
+    reports_context = "\n---\n".join([doc["document"] for doc in similar_docs])
+    
+    # Add market predictions if query mentions price, market, mandi, cost, sell, rate
+    market_prediction_context = ""
+    lower_query = query_text.lower()
+    mkt_keywords = ["price", "mandi", "sell", "rate", "cost", "predict", "forecast", "भाव", "मंडी", "दाम", "कीमत", "बेच"]
+    if any(k in lower_query for k in mkt_keywords):
+        # Determine crop & state
+        crop = crop_context or "wheat"
+        state = location_context or "Maharashtra"
+        
+        # Check if query specifies a crop or state
+        from models.price_predictor import CROPS, STATES
+        for c in CROPS:
+            if c in lower_query:
+                crop = c
+                break
+        for s in STATES:
+            if s.lower() in lower_query:
+                state = s
+                break
+                
+        # Run price predictor
+        try:
+            from datetime import datetime
+            from models.price_predictor import _get_fallback_price
+            last_price = _get_fallback_price(crop)
+            pred = predict(crop=crop, state=state, month=datetime.utcnow().month, last_price=last_price)
+            if not pred.get("error"):
+                market_prediction_context = (
+                    f"Live Mandi Info for {crop} in {state}:\n"
+                    f"- Current estimated price: INR {last_price} per quintal\n"
+                    f"- Predicted price in 7 days: INR {pred.get('predicted_price')} per quintal\n"
+                    f"- Prediction confidence: {pred.get('confidence')}%\n"
+                )
+        except Exception:
+            pass
+
+    # 3. Prompt Construction & LLM Execution
+    llm = get_llm()
+    
+    system_prompt = f"""You are KisanMind Voice Assistant, a friendly AI agricultural advisor speaking directly to a farmer.
+Your response MUST be extremely brief (max 2-3 sentences), simple, conversational, and direct, suitable for speech synthesis.
+Do NOT use any markdown formatting (no bolding, no bullets, no lists, no headings, no asterisks).
+Answer the query based on the following context. If you don't know, keep it short and friendly.
+
+Context from past advisory reports:
+{reports_context}
+
+Context from live market prediction:
+{market_prediction_context}
+
+Farmer's query:
+{query_text}
+
+Language rule: You MUST respond in Hindi (using Devanagari script) if the language parameter is "hi". Otherwise, respond in simple English.
+Ensure natural conversational speech phrasing.
+"""
+    
+    try:
+        response = await llm.ainvoke(system_prompt)
+        text_reply = response.content.strip()
+        # Clean any remaining markdown fences or headers
+        text_reply = text_reply.replace("*", "").replace("#", "").replace("- ", "").strip()
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"LLM generation failed: {str(e)}")
+
+    # 4. Text-to-Speech Synthesis (Sarvam TTS)
+    audio_base64 = ""
+    try:
+        async with httpx.AsyncClient() as client:
+            tts_payload = {
+                "text": text_reply,
+                "speaker": "anushka",
+                "target_language_code": "hi-IN" if lang == "hi" else "en-IN"
+            }
+            tts_headers = {
+                "api-subscription-key": sarvam_key,
+                "Content-Type": "application/json"
+            }
+            tts_response = await client.post(
+                "https://api.sarvam.ai/text-to-speech",
+                json=tts_payload,
+                headers=tts_headers,
+                timeout=30.0
+            )
+            if tts_response.status_code == 200:
+                audios = tts_response.json().get("audios", [])
+                audio_base64 = audios[0] if audios else ""
+            else:
+                # We won't block the request if TTS fails, just return text with empty audio
+                print(f"Sarvam TTS synthesis failed: {tts_response.text}")
+    except Exception as e:
+        print(f"Sarvam TTS error: {str(e)}")
+
+    return {
+        "success": True,
+        "query": query_text,
+        "text_response": text_reply,
+        "audio_response": audio_base64
+    }
+
+
+# ──────────────────────────────────────────────
 # Run with: uvicorn main:app --reload --port 8000
 # ──────────────────────────────────────────────
 

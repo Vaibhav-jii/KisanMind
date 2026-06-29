@@ -10,6 +10,8 @@ import SettingsPage from "../screens/SettingsPage";
 import { useLanguage } from "../contexts/LanguageContext";
 import { getProfile } from "../utils/settingsStore";
 import { syncReportsFromBackend } from "../utils/reportStore";
+import MicButton from "../components/MicButton";
+import VoiceOverlay from "../components/VoiceOverlay";
 
 type PageId = "dashboard" | "crop" | "market" | "schemes" | "weather" | "reports" | "settings";
 
@@ -18,6 +20,8 @@ export default function App() {
   const profile = getProfile();
   const [activePage, setActivePage] = useState<PageId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [sessionId] = useState(() => "farmer_" + Math.random().toString(36).substring(2, 11));
 
   React.useEffect(() => {
     syncReportsFromBackend();
@@ -153,6 +157,14 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      <MicButton onClick={() => setVoiceOpen(true)} visible={!voiceOpen} />
+      <VoiceOverlay
+        voiceOpen={voiceOpen}
+        setVoiceOpen={setVoiceOpen}
+        setActivePage={setActivePage}
+        sessionId={sessionId}
+      />
     </div>
   );
 }
