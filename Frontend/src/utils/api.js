@@ -95,12 +95,16 @@ export async function fetchWeather(location = 'Delhi') {
   }
   const data = await response.json();
 
-  // Normalize backend field names to what the frontend components expect
-  function normalizeDay(d) {
+  // Normalize backend field names to what the frontend components expect.
+  // For today: prefer temp_c (actual current temp from OWM main.temp).
+  // For forecast days: fall back to temp_max_c (no current reading available).
+  function normalizeDay(d, isToday = false) {
     if (!d) return d;
     return {
       ...d,
-      temp: d.temp_max_c ?? d.temp,
+      temp: isToday
+        ? (d.temp_c ?? d.temp_max_c ?? d.temp)
+        : (d.temp_max_c ?? d.temp),
       humidity: d.humidity_percent ?? d.humidity,
       wind_speed: d.wind_speed_kmh ?? d.wind_speed,
       rain_prob: d.rain_probability_percent ?? d.rain_prob,
@@ -110,8 +114,8 @@ export async function fetchWeather(location = 'Delhi') {
 
   const result = {
     ...data,
-    today: normalizeDay(data.today),
-    forecast_3d: (data.forecast_3d || []).map(normalizeDay),
+    today: normalizeDay(data.today, true),
+    forecast_3d: (data.forecast_3d || []).map((d) => normalizeDay(d, false)),
   };
   sessionStorage.setItem(cacheKey, JSON.stringify(result));
   return result;
@@ -203,6 +207,53 @@ export async function switchModel(provider, modelName = null) {
   if (!response.ok) {
     const errData = await response.json().catch(() => ({ detail: 'Failed to switch model' }));
     throw new Error(errData.detail || 'Failed to switch model');
+  }
+  return response.json();
+}
+
+/**
+ * Execute the voice-to-voice RAG chat query.
+ * @param {string} sessionId
+ * @param {Blob|null} audioBlob
+ * @param {string} [text]
+ * @param {string} [lang] - "hi" or "en"
+ * @returns {Promise<object>} { success, query, text_response, audio_response }
+ */
+export async function runVoiceChat(sessionId, audioBlob = null, text = '', lang = 'en') {
+  const formData = new FormData();
+  formData.append('session_id', sessionId);
+  formData.append('lang', lang);
+  
+  if (audioBlob) {
+    formData.append('audio', audioBlob, 'voice_query.wav');
+  }
+  if (text) {
+    formData.append('text', text);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/voice/chat`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({ detail: 'Failed to communicate with voice assistant' }));
+    throw new Error(errData.detail || 'Voice assistant error');
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch a TTS voice greeting from the backend.
+ * @param {string} lang - "hi" or "en"
+ * @returns {Promise<object>} { success, greeting_text, audio_response }
+ */
+export async function fetchVoiceGreeting(lang = 'en') {
+  const response = await fetch(`${API_BASE_URL}/voice/greet?lang=${encodeURIComponent(lang)}`);
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({ detail: 'Greeting fetch failed' }));
+    throw new Error(errData.detail || 'Failed to fetch greeting');
   }
   return response.json();
 }
