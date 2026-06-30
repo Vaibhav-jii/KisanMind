@@ -258,6 +258,7 @@ async def search_reports(q: str, limit: int = 5):
 # ──────────────────────────────────────────────
 
 @app.get("/stats")
+@app.head("/stats")
 async def get_stats():
     """
     Get live platform statistics from Supabase.
@@ -470,6 +471,7 @@ async def update_profile(req: UpdateProfileRequest):
 # ──────────────────────────────────────────────
 
 @app.get("/health")
+@app.head("/health")
 async def health_check():
     """
     System health check — returns active LLM provider
