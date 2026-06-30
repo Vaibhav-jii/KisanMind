@@ -307,6 +307,13 @@ class OTPLoginRequest(BaseModel):
     phone: str
     otp: str
 
+class UpdateProfileRequest(BaseModel):
+    user_id: str
+    name: str
+    city: str
+    state: str
+    land_owned: float
+
 
 @app.post("/auth/register")
 async def register_user(req: RegisterRequest):
@@ -417,6 +424,45 @@ async def otp_login(req: OTPLoginRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OTP login failed: {str(e)}")
+
+
+@app.post("/auth/update")
+async def update_profile(req: UpdateProfileRequest):
+    """
+    Update farmer profile in Supabase.
+    """
+    try:
+        sb = get_supabase()
+        
+        # We need to map state into city if we don't have a state column.
+        # But wait, looking at register, it only takes city and land_owned.
+        # Let's just update name, city, land_owned.
+        
+        result = sb.table("users").update({
+            "name": req.name,
+            "city": req.city,
+            "land_owned": req.land_owned
+        }).eq("id", req.user_id).execute()
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        user = result.data[0]
+        return {
+            "success": True,
+            "message": "Profile updated successfully",
+            "user": {
+                "id": user.get("id"),
+                "name": user.get("name"),
+                "city": user.get("city"),
+                "phone": user.get("phone"),
+                "land_owned": user.get("land_owned"),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Profile update failed: {str(e)}")
 
 
 # ──────────────────────────────────────────────
