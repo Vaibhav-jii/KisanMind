@@ -31,7 +31,5 @@ Thumbs.db
 Backend/data/reports/
 
 # Datasets
-Dataset/
-*.csv
 
 catboost_info/
