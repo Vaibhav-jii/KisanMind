@@ -11,12 +11,16 @@ Endpoints:
 """
 
 import time
+import hashlib
+import json
 from typing import Optional
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 load_dotenv()
 
@@ -27,6 +31,7 @@ from models.state import create_initial_state
 from utils.image_handler import upload_to_base64, validate_image_size
 from utils.llm_provider import get_llm, get_provider_info
 from utils.pdf_generator import generate_pdf
+from utils.supabase_client import get_supabase
 
 # ──────────────────────────────────────────────
 # App Setup
@@ -58,6 +63,7 @@ async def create_advisory(
     crop_type: str = Form(..., description="Type of crop (e.g., wheat, rice, cotton)"),
     location: str = Form(..., description="Location (city or state)"),
     image: Optional[UploadFile] = File(None, description="Optional crop image for disease detection"),
+    user_id: Optional[int] = Form(None, description="Supabase user ID"),
 ):
     """
     Run the full KisanMind multi-agent advisory pipeline.
@@ -99,6 +105,22 @@ async def create_advisory(
                 )
             except Exception:
                 pass  # Non-critical: don't fail the request if ChromaDB save fails
+
+            # Also save to Supabase (cloud persistence)
+            try:
+                sb = get_supabase()
+                sb.table("reports").insert({
+                    "session_id": result.get("session_id", ""),
+                    "crop": crop_type,
+                    "location": location,
+                    "query": query,
+                    "report_markdown": result["final_report"],
+                    "execution_time": result.get("execution_time_parallel"),
+                    "user_id": user_id,
+                    "created_at": datetime.utcnow().isoformat(),
+                }).execute()
+            except Exception:
+                pass  # Non-critical
 
         # Build response
         return {
@@ -155,13 +177,35 @@ async def download_advisory_pdf(
 # ──────────────────────────────────────────────
 
 @app.get("/history/all")
-async def get_all_session_history():
+async def get_all_session_history(user_id: Optional[int] = None):
     """
-    Retrieve all past advisory reports from ChromaDB.
+    Retrieve past advisory reports from Supabase for a specific user.
+    Falls back to ChromaDB if no user_id is provided.
     """
     from memory.long_term import get_all_history
     try:
-        history = get_all_history(limit=50)
+        if user_id:
+            sb = get_supabase()
+            res = sb.table("reports").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
+            
+            # Format to match existing ChromaDB response structure
+            history = []
+            for row in (res.data or []):
+                history.append({
+                    "id": row.get("session_id"),
+                    "document": row.get("report_markdown"),
+                    "metadata": {
+                        "session_id": row.get("session_id"),
+                        "crop": row.get("crop"),
+                        "location": row.get("location"),
+                        "query": row.get("query"),
+                        "saved_at": row.get("created_at")
+                    }
+                })
+        else:
+            # Fallback to global ChromaDB
+            history = get_all_history(limit=50)
+            
         return {
             "success": True,
             "total_reports": len(history),
@@ -207,6 +251,172 @@ async def search_reports(q: str, limit: int = 5):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+# ──────────────────────────────────────────────
+# GET /stats
+# ──────────────────────────────────────────────
+
+@app.get("/stats")
+async def get_stats():
+    """
+    Get live platform statistics from Supabase.
+    """
+    try:
+        sb = get_supabase()
+        # Real user count from Supabase
+        users_res = sb.table("users").select("id", count="exact").execute()
+        user_count = users_res.count or 0
+        
+        # Real report count from Supabase
+        reports_res = sb.table("reports").select("id", count="exact").execute()
+        report_count = reports_res.count or 0
+        
+        return {
+            "success": True,
+            "registered_farmers": f"{user_count:,}",
+            "reports_this_month": str(report_count),
+            "benefits_disbursed": "₹18.4L"  # Mocked until transactions are added
+        }
+    except Exception as e:
+        return {
+            "success": True,
+            "registered_farmers": "0",
+            "reports_this_month": "0",
+            "benefits_disbursed": "₹0"
+        }
+
+
+# ──────────────────────────────────────────────
+# Auth Endpoints (Supabase)
+# ──────────────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    name: str
+    city: str
+    email: str
+    password: str
+    phone: str = ""
+    land_owned: str = ""
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class OTPLoginRequest(BaseModel):
+    phone: str
+    otp: str
+
+
+@app.post("/auth/register")
+async def register_user(req: RegisterRequest):
+    """
+    Register a new farmer in Supabase.
+    """
+    try:
+        sb = get_supabase()
+        # Hash password (simple sha256 for demo — use bcrypt in production)
+        pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+        
+        # Check if user already exists
+        existing = sb.table("users").select("id").eq("email", req.email).execute()
+        if existing.data and len(existing.data) > 0:
+            raise HTTPException(status_code=409, detail="User already exists with this email")
+        
+        # Insert user
+        result = sb.table("users").insert({
+            "name": req.name,
+            "city": req.city,
+            "email": req.email,
+            "password_hash": pw_hash,
+            "phone": req.phone,
+            "land_owned": req.land_owned,
+            "created_at": datetime.utcnow().isoformat(),
+        }).execute()
+        
+        user = result.data[0] if result.data else {}
+        
+        return {
+            "success": True,
+            "message": "Registration successful",
+            "user": {
+                "id": user.get("id"),
+                "name": req.name,
+                "city": req.city,
+                "phone": req.phone,
+                "land_owned": req.land_owned,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@app.post("/auth/login")
+async def login_user(req: LoginRequest):
+    """
+    Login a farmer by email/ID + password.
+    """
+    try:
+        sb = get_supabase()
+        pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+        
+        result = sb.table("users").select("*").eq("email", req.email).eq("password_hash", pw_hash).execute()
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        user = result.data[0]
+        return {
+            "success": True,
+            "message": "Login successful",
+            "user": {
+                "id": user.get("id"),
+                "name": user.get("name"),
+                "city": user.get("city"),
+                "phone": user.get("phone"),
+                "land_owned": user.get("land_owned"),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@app.post("/auth/otp-login")
+async def otp_login(req: OTPLoginRequest):
+    """
+    Mock OTP login — accepts 123456 as valid OTP.
+    In production, integrate Twilio/Supabase Auth.
+    """
+    if req.otp != "123456":
+        raise HTTPException(status_code=401, detail="Invalid OTP")
+    
+    try:
+        sb = get_supabase()
+        result = sb.table("users").select("*").eq("phone", req.phone).execute()
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="No account found with this phone number. Please register first.")
+        
+        user = result.data[0]
+        return {
+            "success": True,
+            "message": "OTP verified",
+            "user": {
+                "id": user.get("id"),
+                "name": user.get("name"),
+                "city": user.get("city"),
+                "phone": user.get("phone"),
+                "land_owned": user.get("land_owned"),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OTP login failed: {str(e)}")
 
 
 # ──────────────────────────────────────────────

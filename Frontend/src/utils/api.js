@@ -9,6 +9,17 @@ export async function runAdvisory(cropType, location, query, imageFile = null) {
   formData.append('location', location);
   formData.append('query', query || `Analyze crop health for ${cropType} in ${location}`);
   
+  // Inject logged-in user_id if available
+  const userJson = localStorage.getItem("kisanmind_user");
+  if (userJson) {
+    try {
+      const user = JSON.parse(userJson);
+      if (user && user.id) {
+        formData.append('user_id', user.id.toString());
+      }
+    } catch (e) {}
+  }
+  
   if (imageFile) {
     formData.append('image', imageFile);
   }
@@ -40,8 +51,12 @@ export async function getHistory(sessionId) {
 /**
  * Fetch all past advisory reports.
  */
-export async function getAllHistory() {
-  const response = await fetch(`${API_BASE_URL}/history/all`);
+export async function getAllHistory(userId = null) {
+  let url = `${API_BASE_URL}/history/all`;
+  if (userId) {
+    url += `?user_id=${userId}`;
+  }
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error('Failed to retrieve all history');
   }
