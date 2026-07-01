@@ -25,21 +25,19 @@ export default function Login({ onLogin }: { onLogin?: () => void } = {}) {
 
   // Real stats from backend
   const [stats, setStats] = useState([
-    { value: "1,284", label: "Registered Farmers" },
-    { value: "347", label: "Reports This Month" },
-    { value: "₹18.4L", label: "Benefits Disbursed" },
+    { value: "-", label: "Registered Farmers" },
+    { value: "-", label: "Reports This Month" }
   ]);
 
   useEffect(() => {
-    const API = import.meta.env.VITE_API_URL || "https://kisanmind-2vzy.onrender.com";
+    const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
     fetch(`${API}/stats`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
           setStats([
             { value: data.registered_farmers, label: "Registered Farmers" },
-            { value: data.reports_this_month, label: "Reports This Month" },
-            { value: data.benefits_disbursed, label: "Benefits Disbursed" },
+            { value: data.reports_this_month, label: "Reports This Month" }
           ]);
         }
       })
@@ -52,7 +50,7 @@ export default function Login({ onLogin }: { onLogin?: () => void } = {}) {
     setError("");
 
     try {
-      const API = import.meta.env.VITE_API_URL || "https://kisanmind-2vzy.onrender.com";
+      const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
       let res: Response;
 
       if (mode === 'register') {
@@ -189,11 +187,11 @@ export default function Login({ onLogin }: { onLogin?: () => void } = {}) {
         {/* Bottom stats */}
         <div className="relative z-10">
           <div
-            className="pt-6 grid grid-cols-3 gap-0"
+            className="pt-6 grid grid-cols-2 gap-0"
             style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}
           >
             {stats.map((s, i) => (
-              <div key={i} className={i < 2 ? "pr-6 border-r" : "pl-6"} style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <div key={i} className={i === 0 ? "pr-6 border-r" : "pl-6"} style={{ borderColor: "rgba(255,255,255,0.08)" }}>
                 <div
                   className="text-[20px] font-semibold tracking-tight"
                   style={{ fontFamily: "'DM Mono', monospace", color: "#f0f7eb" }}
@@ -204,9 +202,7 @@ export default function Login({ onLogin }: { onLogin?: () => void } = {}) {
               </div>
             ))}
           </div>
-          <div className="mt-5 text-[11px]" style={{ color: "#4a6a3a" }}>
-            Uttar Pradesh Directorate of Agriculture · Season 2026
-          </div>
+
         </div>
       </div>
 

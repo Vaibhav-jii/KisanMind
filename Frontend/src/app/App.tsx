@@ -8,6 +8,7 @@ import WeatherPage from "../screens/WeatherPage";
 import ReportsPage from "../screens/ReportsPage";
 import SettingsPage from "../screens/SettingsPage";
 import Login from "../login/Login";
+import Landing from "../landing/landing";
 import { useLanguage } from "../contexts/LanguageContext";
 import { getProfile } from "../utils/settingsStore";
 import { syncReportsFromBackend } from "../utils/reportStore";
@@ -24,20 +25,23 @@ export default function App() {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [sessionId] = useState(() => "farmer_" + Math.random().toString(36).substring(2, 11));
 
-  // Auth state — check localStorage on mount
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return !!localStorage.getItem("kisanmind_user");
+  // Auth state
+  const [authPhase, setAuthPhase] = useState<"landing" | "login" | "app">(() => {
+    return localStorage.getItem("kisanmind_user") ? "app" : "landing";
   });
 
   React.useEffect(() => {
-    if (isLoggedIn) {
+    if (authPhase === "app") {
       syncReportsFromBackend();
     }
-  }, [isLoggedIn]);
+  }, [authPhase]);
 
-  // If not logged in, show Login screen
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  if (authPhase === "landing") {
+    return <Landing onEnter={() => setAuthPhase("login")} />;
+  }
+
+  if (authPhase === "login") {
+    return <Login onLogin={() => setAuthPhase("app")} />;
   }
 
   const NAV_ITEMS: { id: PageId; labelKey: string; icon: any }[] = [
@@ -140,12 +144,7 @@ export default function App() {
           </button>
         </div>
 
-        <div className="px-4 py-3 border-t border-border flex-shrink-0">
-          <div className="text-[11px] text-muted-foreground leading-relaxed">
-            UP Agricultural Intelligence<br />
-            <span className="text-[10px] opacity-70">v2.4.1 · Ministry of Agriculture</span>
-          </div>
-        </div>
+
       </aside>
 
       {/* Main */}
