@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://kisanmind-2vzy.onrender.com';
+// Use Vercel environment variables in production, fallback to localhost for local development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Execute the multi-agent agricultural advisory pipeline.
